@@ -1,0 +1,27 @@
+from sqlalchemy import create_engine, MetaData, Integer, String, Table, Column
+
+# Create MySQL engine (replace with your MySQL connection details)
+engine = create_engine('mysql://username:password@localhost/database_name')
+
+metadata = MetaData()
+connection = engine.connect()
+
+# Define table structure
+sample = Table('images', metadata,
+               Column('id', Integer),
+               Column('Image_url', String(255))  # Assuming URLs are no longer than 255 characters
+               )
+
+# Create the table
+metadata.create_all(engine)
+
+# Reflect metadata
+metadata.reflect(engine)
+a1 = metadata.tables['images']
+
+# Path to the image
+image_url = "http://example.com/image.jpg"  # Replace with the actual URL of your image
+
+# Insert the image URL into the database
+connection.execute(a1.insert().values(id=1, Image_url=image_url))
+connection.close()

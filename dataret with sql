@@ -10,9 +10,9 @@ metadata = MetaData()
 connection = engine.connect()
 metadata.reflect(bind=engine)
 
-if 'g' in metadata.tables:
+if 'images' in metadata.tables:
     samp = metadata.tables['g']
-    stmt = text('SELECT * FROM g WHERE id = 2')
+    stmt = text('SELECT * FROM images WHERE id = 2')
     result = connection.execute(stmt).fetchall()
 
     for i in result:

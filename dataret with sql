@@ -1,0 +1,33 @@
+from sqlalchemy import create_engine, MetaData, text
+import numpy as np
+import cv2
+import pickle
+
+# Create MySQL engine (replace with your MySQL connection details)
+engine = create_engine('mysql://username:password@localhost/database_name')
+
+metadata = MetaData()
+connection = engine.connect()
+metadata.reflect(bind=engine)
+
+if 'g' in metadata.tables:
+    samp = metadata.tables['g']
+    stmt = text('SELECT * FROM g WHERE id = 2')
+    result = connection.execute(stmt).fetchall()
+
+    for i in result:
+        img = i[1]
+
+    # Convert bytes to numpy array
+    descriptors = pickle.loads(img)
+    print(type(descriptors))
+    print(descriptors)
+    
+    # Display the grayscale image
+    cv2.imshow("Image", descriptors)
+    cv2.waitKey(0)
+
+else:
+    print("Table doesn't exist")
+
+connection.commit()  # No need to commit in MySQL, unless you're performing transactions

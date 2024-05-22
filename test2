@@ -84,3 +84,37 @@ for filename in os.listdir(IMAGE_DIR):
             print(f"Image {filename} inserted into the database.")
         except SQLAlchemyError as e:
             print(f"Error inserting image {filename} into the database: {e}")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Room_test_table = Table('Room_test', metadata, autoload=True, autoload_with=engine)
+
+# Get the list of image paths from the database
+with engine.connect() as connection:
+    query = select([Room_test_table.c.image_path])
+    result = connection.execute(query)
+    db_image_paths = [row[0] for row in result]
+
+# Iterate over the directory containing images
+for filename in os.listdir(IMAGE_DIR):
+    if filename.endswith(('.jpg', '.jpeg', '.png', '.webp')):
+        image_path = os.path.join(IMAGE_DIR, filename)
+        # Check if the image path exists in the database
+        if image_path in db_image_paths:
+            print(f"Image {filename} is present in the database.")
+        else:
+            print(f"Image {filename} is not present in the database.")

@@ -1,11 +1,20 @@
 from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import text
+import os
 
-# Replace with your MySQL connection details
-MYSQL_SERVER_URI = 'mysql+mysqlconnector://myuser:mypassword@localhost'
-DATABASE_NAME = 'temple_inscriptions'
-DATABASE_URI = f'mysql+mysqlconnector://myuser:mypassword@localhost/{DATABASE_NAME}'
+# Retrieve MySQL connection details from environment variables
+MYSQL_USER = os.getenv("MYSQL_USER", "PlactoDeMaxim")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "Daswanth!31")
+MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
+DATABASE_NAME = 'Room_test'
+
+# Construct URIs
+MYSQL_SERVER_URI = f"mysql+mysqlconnector://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}"
+DATABASE_URI = f"mysql+mysqlconnector://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}/{DATABASE_NAME}"
+
+IMAGE_DIR = 'images'
+os.makedirs(IMAGE_DIR, exist_ok=True)
 
 # Create MySQL engine for server connection
 server_engine = create_engine(MYSQL_SERVER_URI)
@@ -25,32 +34,36 @@ engine = create_engine(DATABASE_URI)
 metadata = MetaData()
 
 # Define table structure
-inscriptions_table = Table(
-    'inscriptions', metadata,
+Room_test_table = Table(
+    'Room_test', metadata,
     Column('id', Integer, primary_key=True, autoincrement=True),
-    Column('image_url', String(255), nullable=False),
-    Column('inscription_text', String(255), nullable=False)
+    Column('image_path', String(255), nullable=False),
+    Column('room_text', String(255), nullable=False)
 )
 
 # Create the table if it doesn't exist
 try:
     metadata.create_all(engine)
-    print("Table 'inscriptions' created successfully.")
+    print("Table 'Room_test' created successfully.")
 except SQLAlchemyError as e:
     print(f"Error creating table: {e}")
 
 # Sample data to be inserted
 sample_data = [
-    {"image_url": "http://example.com/image1.jpg", "inscription_text": "Inscription text for image 1"},
-    {"image_url": "http://example.com/image2.jpg", "inscription_text": "Inscription text for image 2"},
-    {"image_url": "http://example.com/image3.jpg", "inscription_text": "Inscription text for image 3"},
+    {"image_path": "testimages/testimage1", "room_text": "Inscription text for image 1"},
+    {"image_path": "testimages/testimage2", "room_text": "Inscription text for image 2"},
+    {"image_path": "testimages/testimage3", "room_text": "Inscription text for image 3"},
+    {"image_path": "testimages/testimage4", "room_text": "Inscription text for image 4"},
+    {"image_path": "testimages/testimage5", "room_text": "Inscription text for image 5"},
+    {"image_path": "testimages/testimage6", "room_text": "Inscription text for image 6"},
 ]
 
 # Insert sample data into the table
 try:
     with engine.connect() as connection:
         for data in sample_data:
-            connection.execute(inscriptions_table.insert().values(data))
+            connection.execute(Room_test_table.insert().values(data))
         print("Sample data inserted successfully.")
 except SQLAlchemyError as e:
     print(f"Error inserting data: {e}")
+

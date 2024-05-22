@@ -1,0 +1,86 @@
+from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String
+from sqlalchemy.exc import SQLAlchemyError
+import os
+from PIL import Image
+
+# Define function to process images
+def process_image(image_path):
+    # Open the image
+    image = Image.open(image_path)
+    # Process the image (e.g., resize, compress)
+    # Save the processed image or extract metadata if needed
+    # Return processed image or metadata
+
+# Retrieve MySQL connection details from environment variables
+MYSQL_USER = os.getenv("MYSQL_USER", "PlactoDeMaxim")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "Daswanth!31")
+MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
+DATABASE_NAME = 'Room_test'
+
+# Construct URIs
+MYSQL_SERVER_URI = f"mysql+mysqlconnector://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}"
+DATABASE_URI = f"mysql+mysqlconnector://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}/{DATABASE_NAME}"
+
+IMAGE_DIR = 'images'
+os.makedirs(IMAGE_DIR, exist_ok=True)
+
+# Create MySQL engine for server connection
+server_engine = create_engine(MYSQL_SERVER_URI)
+
+# Create the database if it doesn't exist
+try:
+    with server_engine.connect() as connection:
+        connection.execute(text(f"CREATE DATABASE IF NOT EXISTS {DATABASE_NAME}"))
+    print(f"Database '{DATABASE_NAME}' created or already exists.")
+except SQLAlchemyError as e:
+    print(f"Error creating database: {e}")
+
+# Create MySQL engine for database connection
+engine = create_engine(DATABASE_URI)
+
+# Define metadata
+metadata = MetaData()
+
+# Define table structure
+Room_test_table = Table(
+    'Room_testt', metadata,
+    Column('id', Integer, primary_key=True, autoincrement=True),
+    Column('image_path', String(255), nullable=False),
+    Column('room_text', String(255), nullable=False)
+)
+
+# Create the table if it doesn't exist
+try:
+    metadata.create_all(engine)
+    print("Table 'Room_test' created successfully.")
+except SQLAlchemyError as e:
+    print(f"Error creating table: {e}")
+
+# Define function to process images
+def process_image(image_path):
+    # Open the image
+    image = Image.open(image_path)
+    # Process the image (e.g., resize, compress)
+    # Save the processed image or extract metadata if needed
+    # Return processed image or metadata
+
+# Define directory to store images
+IMAGE_DIR = 'images'
+os.makedirs(IMAGE_DIR, exist_ok=True)
+
+# Iterate over the directory containing images
+for filename in os.listdir(IMAGE_DIR):
+    if filename.endswith(('.jpg', '.jpeg', '.png', '.webp')):
+        image_path = os.path.join(IMAGE_DIR, filename)
+        # Process the image
+        processed_image = process_image(image_path)
+        # Insert image path and metadata into the database
+        try:
+            with engine.connect() as connection:
+                connection.execute(Room_test_table.insert().values({
+                    'image_path': image_path,
+                    'metadata': processed_image.metadata
+                }))
+            print(f"Image {filename} inserted into the database.")
+        except SQLAlchemyError as e:
+            print(f"Error inserting image {filename} into the database: {e}")

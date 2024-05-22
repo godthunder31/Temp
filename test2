@@ -3,6 +3,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import text
 import os
 from PIL import Image
+import csv
 # Define function to process images
 def process_image(image_path):
     image = Image.open(image_path)
@@ -23,7 +24,7 @@ IMAGE_DIR = 'testimages'
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
 # Create MySQL engine for server connection
-server_engine = create_engine(MYSQL_SERVER_URI)
+server_engine = create_engine(MYSQL_SERVER_URI, connect_args={"autocommit": True})
 
 # Create the database if it doesn't exist
 try:
@@ -58,9 +59,6 @@ try:
 except SQLAlchemyError as e:
     print(f"Error reflecting table: {e}")
 
-
-# Insert image paths into the database if they are not already present
-# Insert image paths into the database if they are not already present
 # Insert image paths into the database if they are not already present
 from sqlalchemy import select, Column
 
@@ -68,22 +66,19 @@ from sqlalchemy import select, Column
 
 image_path_column = Room_testing_table_reflected.columns.image_path
 
-# Insert image paths into the database if they are not already present
-with engine.connect() as connection:
-    for filename in os.listdir(IMAGE_DIR):
-        if filename.endswith(('.jpg', '.jpeg', '.png', '.webp')):
-            image_path = os.path.join(IMAGE_DIR, filename)
-            # Check if the image path already exists in the database
-            query = select(image_path_column).where(image_path_column == image_path)
-            result = connection.execute(query)
-            if result.fetchone() is None:
-                # Insert image path into the database
-                insert_stmt = Room_testing_table_reflected.insert().values(image_path=image_path, room_text="Sample text")
-                connection.execute(insert_stmt)
-                print(f"Inserted {filename} into the database.")
-            else:
-                print(f"{filename} already exists in the database.")
+metadata_file = 'image_metadata.csv'
+room_texts = {}
+with open(metadata_file, mode='r') as file:
+    reader = csv.DictReader(file)
+    for row in reader:
+        room_texts[row['filename']] = row['room_text']
+print("Loaded room texts:")
+for filename, room_text in room_texts.items():
+    print(f"{filename}: {room_text}")
 
+print("Loaded room texts:")
+for filename, room_text in room_texts.items():
+    print(f"{filename}: {room_text}")
 
 # Get the list of image paths from the database
 with engine.connect() as connection:
@@ -95,25 +90,45 @@ print("Database Image Paths:")
 for path in db_image_paths:
     print(path)
 
+with engine.connect() as connection:
+    for filename in os.listdir(IMAGE_DIR):
+        if filename.endswith(('.jpg', '.jpeg', '.png', '.webp')):
+            image_path = os.path.join(IMAGE_DIR, filename)
+            room_text = room_texts.get(filename, 'Unknown Room')
+            # Check if the image path already exists in the database
+            query = select(image_path_column).where(image_path_column == image_path)
+            result = connection.execute(query)
+            if result.fetchone() is None:
+                # Insert image path into the database
+                print(f"Attempting to insert {filename} with path: {image_path} and room_text: {room_text}")
+                insert_stmt = Room_testing_table_reflected.insert().values(image_path=image_path, room_text=room_text)
+                connection.execute(insert_stmt)
+                print(f"Inserted {filename} into the database with room_text: {room_text}")
+            else:
+                print(f"{filename} already exists in the database.")
+
+# Get the list of image paths from the database
+with engine.connect() as connection:
+    query = select(image_path_column)
+    result = connection.execute(query)
+    db_image_paths = [os.path.abspath(row[0]) for row in result]
+    print("Database Image Paths:")
+    for path in db_image_paths:
+        print(path)
+
+# Iterate over the directory containing images
 for filename in os.listdir(IMAGE_DIR):
     if filename.endswith(('.jpg', '.jpeg', '.png', '.webp')):
         image_path = os.path.join(IMAGE_DIR, filename)
-        image_path = os.path.abspath(image_path)
+        image_path_abs = os.path.abspath(image_path)
+        room_text = room_texts.get(filename, 'Unknown Room')
         # Check if the image path exists in the database
         if image_path in db_image_paths:
             print(f"Image {filename} is present in the database.")
         else:
             print(f"Image {filename} is not present in the database.")
-            # Debug insertion process
-            print(f"Attempting to insert {filename} with path: {image_path}")
-            # Check if the image path already exists in the database
-            query = select(image_path_column).where(image_path_column == image_path)
+            print(f"Attempting to insert {filename} with path: {image_path} and room_text: {room_text}")
             with engine.connect() as connection:
-                result = connection.execute(query)
-                if result.fetchone() is None:
-                    # Insert image path into the database
-                    insert_stmt = Room_testing_table_reflected.insert().values(image_path=image_path, room_text="Sample text")
-                    connection.execute(insert_stmt)
-                    print(f"Inserted {filename} into the database.")
-                else:
-                    print(f"{filename} already exists in the database.")
+                insert_stmt = Room_testing_table_reflected.insert().values(image_path=image_path_abs, room_text=room_text)
+                connection.execute(insert_stmt)
+                print(f"Inserted {filename} into the database with room_text: {room_text}")

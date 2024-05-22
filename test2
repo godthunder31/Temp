@@ -1,15 +1,13 @@
-from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String
+from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String, select
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.sql import text
 import os
 from PIL import Image
-
 # Define function to process images
 def process_image(image_path):
-    # Open the image
     image = Image.open(image_path)
-    # Process the image (e.g., resize, compress)
-    # Save the processed image or extract metadata if needed
-    # Return processed image or metadata
+    metadata = {"size": image.size, "format": image.format}
+    return metadata
 
 # Retrieve MySQL connection details from environment variables
 MYSQL_USER = os.getenv("MYSQL_USER", "PlactoDeMaxim")
@@ -21,7 +19,7 @@ DATABASE_NAME = 'Room_test'
 MYSQL_SERVER_URI = f"mysql+mysqlconnector://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}"
 DATABASE_URI = f"mysql+mysqlconnector://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}/{DATABASE_NAME}"
 
-IMAGE_DIR = 'images'
+IMAGE_DIR = 'testimages'
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
 # Create MySQL engine for server connection
@@ -36,14 +34,14 @@ except SQLAlchemyError as e:
     print(f"Error creating database: {e}")
 
 # Create MySQL engine for database connection
-engine = create_engine(DATABASE_URI)
+engine = create_engine(DATABASE_URI, connect_args={"autocommit": True})
 
 # Define metadata
 metadata = MetaData()
 
 # Define table structure
-Room_test_table = Table(
-    'Room_testt', metadata,
+Room_testing_table = Table(
+    'Room_testing', metadata,
     Column('id', Integer, primary_key=True, autoincrement=True),
     Column('image_path', String(255), nullable=False),
     Column('room_text', String(255), nullable=False)
@@ -52,69 +50,70 @@ Room_test_table = Table(
 # Create the table if it doesn't exist
 try:
     metadata.create_all(engine)
-    print("Table 'Room_test' created successfully.")
+    print("Table 'Room_testing' created successfully.")
 except SQLAlchemyError as e:
     print(f"Error creating table: {e}")
-
-# Define function to process images
-def process_image(image_path):
-    # Open the image
-    image = Image.open(image_path)
-    # Process the image (e.g., resize, compress)
-    # Save the processed image or extract metadata if needed
-    # Return processed image or metadata
-
-# Define directory to store images
-IMAGE_DIR = 'images'
-os.makedirs(IMAGE_DIR, exist_ok=True)
-
-# Iterate over the directory containing images
-for filename in os.listdir(IMAGE_DIR):
-    if filename.endswith(('.jpg', '.jpeg', '.png', '.webp')):
-        image_path = os.path.join(IMAGE_DIR, filename)
-        # Process the image
-        processed_image = process_image(image_path)
-        # Insert image path and metadata into the database
-        try:
-            with engine.connect() as connection:
-                connection.execute(Room_test_table.insert().values({
-                    'image_path': image_path,
-                    'metadata': processed_image.metadata
-                }))
-            print(f"Image {filename} inserted into the database.")
-        except SQLAlchemyError as e:
-            print(f"Error inserting image {filename} into the database: {e}")
+try:
+ Room_testing_table_reflected = Table('Room_testing', metadata, autoload_with=engine)
+except SQLAlchemyError as e:
+    print(f"Error reflecting table: {e}")
 
 
+# Insert image paths into the database if they are not already present
+# Insert image paths into the database if they are not already present
+# Insert image paths into the database if they are not already present
+from sqlalchemy import select, Column
 
+# Define the column object explicitly
 
+image_path_column = Room_testing_table_reflected.columns.image_path
 
+# Insert image paths into the database if they are not already present
+with engine.connect() as connection:
+    for filename in os.listdir(IMAGE_DIR):
+        if filename.endswith(('.jpg', '.jpeg', '.png', '.webp')):
+            image_path = os.path.join(IMAGE_DIR, filename)
+            # Check if the image path already exists in the database
+            query = select(image_path_column).where(image_path_column == image_path)
+            result = connection.execute(query)
+            if result.fetchone() is None:
+                # Insert image path into the database
+                insert_stmt = Room_testing_table_reflected.insert().values(image_path=image_path, room_text="Sample text")
+                connection.execute(insert_stmt)
+                print(f"Inserted {filename} into the database.")
+            else:
+                print(f"{filename} already exists in the database.")
 
-
-
-
-
-
-
-
-
-
-
-
-Room_test_table = Table('Room_test', metadata, autoload=True, autoload_with=engine)
 
 # Get the list of image paths from the database
 with engine.connect() as connection:
-    query = select([Room_test_table.c.image_path])
+    query = select(image_path_column)
     result = connection.execute(query)
-    db_image_paths = [row[0] for row in result]
+    db_image_paths = [os.path.abspath(row[0]) for row in result]
 
-# Iterate over the directory containing images
+print("Database Image Paths:")
+for path in db_image_paths:
+    print(path)
+
 for filename in os.listdir(IMAGE_DIR):
     if filename.endswith(('.jpg', '.jpeg', '.png', '.webp')):
         image_path = os.path.join(IMAGE_DIR, filename)
+        image_path = os.path.abspath(image_path)
         # Check if the image path exists in the database
         if image_path in db_image_paths:
             print(f"Image {filename} is present in the database.")
         else:
             print(f"Image {filename} is not present in the database.")
+            # Debug insertion process
+            print(f"Attempting to insert {filename} with path: {image_path}")
+            # Check if the image path already exists in the database
+            query = select(image_path_column).where(image_path_column == image_path)
+            with engine.connect() as connection:
+                result = connection.execute(query)
+                if result.fetchone() is None:
+                    # Insert image path into the database
+                    insert_stmt = Room_testing_table_reflected.insert().values(image_path=image_path, room_text="Sample text")
+                    connection.execute(insert_stmt)
+                    print(f"Inserted {filename} into the database.")
+                else:
+                    print(f"{filename} already exists in the database.")

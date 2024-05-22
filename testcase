@@ -1,0 +1,51 @@
+import mysql.connector
+
+# Database connection details
+db_config = {
+    'user': 'your_mysql_username',     # Replace with your MySQL username
+    'password': 'your_mysql_password', # Replace with your MySQL password
+    'host': '127.0.0.1',               # Replace with the MySQL server address
+    'database': 'temple_inscriptions'  # Name of the database to connect to
+}
+
+# Establish a database connection
+db_connection = mysql.connector.connect(**db_config)
+cursor = db_connection.cursor()
+
+# Function to create the table
+def create_table():
+    create_table_query = '''
+    CREATE TABLE IF NOT EXISTS inscriptions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        image_url VARCHAR(255) NOT NULL,
+        inscription_text TEXT NOT NULL
+    );
+    '''
+    cursor.execute(create_table_query)
+    db_connection.commit()
+
+# Function to insert data into the table
+def insert_data(image_url, inscription_text):
+    insert_query = '''
+    INSERT INTO inscriptions (image_url, inscription_text)
+    VALUES (%s, %s);
+    '''
+    cursor.execute(insert_query, (image_url, inscription_text))
+    db_connection.commit()
+
+# Create the table
+create_table()
+
+# Insert sample data
+sample_data = [
+    ("http://example.com/image1.jpg", "Inscription text for image 1"),
+    ("http://example.com/image2.jpg", "Inscription text for image 2"),
+    ("http://example.com/image3.jpg", "Inscription text for image 3"),
+]
+
+for image_url, inscription_text in sample_data:
+    insert_data(image_url, inscription_text)
+
+# Close the database connection
+cursor.close()
+db_connection.close()

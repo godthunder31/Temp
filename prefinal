@@ -1,0 +1,157 @@
+from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String, select, LargeBinary
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.sql import text
+import os
+from PIL import Image
+import csv
+import cv2
+import numpy as np
+# Define function to process images
+def process_image(image_path):
+    image = Image.open(image_path)
+    metadata = {"size": image.size, "format": image.format}
+    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    orb = cv2.ORB_create()
+    keypoints, descriptors_orb = orb.detectAndCompute(image, None)
+    sift = cv2.SIFT_create()
+    keypoints, descriptors_sift = sift.compute(image, keypoints)
+    
+    # Return descriptors
+    return descriptors_sift
+    return metadata
+
+# Retrieve MySQL connection details from environment variables
+MYSQL_USER = os.getenv("MYSQL_USER", "PlactoDeMaxim")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "Daswanth!31")
+MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
+DATABASE_NAME = 'Room_test'
+
+# Construct URIs
+MYSQL_SERVER_URI = f"mysql+mysqlconnector://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}"
+DATABASE_URI = f"mysql+mysqlconnector://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}/{DATABASE_NAME}"
+
+IMAGE_DIR = 'testimages'
+os.makedirs(IMAGE_DIR, exist_ok=True)
+
+# Create MySQL engine for server connection
+server_engine = create_engine(MYSQL_SERVER_URI, connect_args={"autocommit": True})
+
+# Create the database if it doesn't exist
+try:
+    with server_engine.connect() as connection:
+        connection.execute(text(f"CREATE DATABASE IF NOT EXISTS {DATABASE_NAME}"))
+    print(f"Database '{DATABASE_NAME}' created or already exists.")
+except SQLAlchemyError as e:
+    print(f"Error creating database: {e}")
+
+# Create MySQL engine for database connection
+engine = create_engine(DATABASE_URI, connect_args={"autocommit": True})
+
+# Define metadata
+metadata = MetaData()
+
+
+# Define table structure
+Room_testing_table = Table(
+    'Room_testing', metadata,
+    Column('id', Integer, primary_key=True, autoincrement=True),
+    Column('image_path', String(255), nullable=False),
+    Column('room_text', String(255), nullable=False),
+    Column('descriptors', LargeBinary(length=4294967295), nullable=True)  # Maximum length for LONGBLOB
+
+)
+
+# Create the table if it doesn't exist
+try:
+    metadata.create_all(engine)
+except SQLAlchemyError as e:
+    print(f"Error creating table: {e}")
+try:
+ Room_testing_table_reflected = Table('Room_testing', metadata, autoload_with=engine)
+except SQLAlchemyError as e:
+    print(f"Error reflecting table: {e}")
+
+# Insert image paths into the database if they are not already present
+from sqlalchemy import select, Column
+
+# Define the column object explicitly
+
+image_path_column = Room_testing_table_reflected.columns.image_path
+
+metadata_file = 'image_metadata.csv'
+room_texts = {}
+with open(metadata_file, mode='r') as file:
+    reader = csv.DictReader(file)
+    for row in reader:
+        room_texts[row['filename']] = row['room_text']
+
+
+# Get the list of image paths from the database
+with engine.connect() as connection:
+    query = select(image_path_column)
+    result = connection.execute(query)
+    db_image_paths = [os.path.abspath(row[0]) for row in result]
+    
+
+# Iterate over the directory containing images
+for filename in os.listdir(IMAGE_DIR):
+    if filename.endswith(('.jpg', '.jpeg', '.png', '.webp')):
+        image_path = os.path.join(IMAGE_DIR, filename)
+        image_path_abs = os.path.abspath(image_path)
+        room_text = room_texts.get(filename, 'Unknown Room')
+        descriptors = process_image(image_path)
+        with engine.connect() as connection:
+         query = select(image_path_column).where(image_path_column == image_path)
+         result = connection.execute(query)
+         # Check if the image path exists in the database
+         if image_path_abs in db_image_paths:
+            print(f"Image {filename} is present in the database.")
+         else:
+            print(f"Image {filename} is not present in the database.")
+            print(f"Attempting to insert {filename} with path: {image_path} and room_text: {room_text}")
+            with engine.connect() as connection:
+                insert_stmt = Room_testing_table_reflected.insert().values(image_path=image_path_abs, room_text=room_text,  descriptors=descriptors.tobytes() if descriptors is not None else None)
+                connection.execute(insert_stmt)
+                print(f"Inserted {filename} into the database with room_text: {room_text}")
+
+from sklearn.neighbors import NearestNeighbors
+db_descriptors = []
+db_room_texts = []
+db_image_paths = []
+with engine.connect() as connection:
+    query = select(Room_testing_table_reflected.c.image_path, Room_testing_table_reflected.c.descriptors, Room_testing_table_reflected.c.room_text)
+    result = connection.execute(query)
+    for row in result:
+       
+       if row[1] is not None:  # Use integer indices
+            descriptors = np.frombuffer(row[1], dtype=np.float32).reshape(-1, 128)
+            db_descriptors.append(descriptors)
+            db_room_texts.append(row[2])  # Use integer indices
+            db_image_paths.append(row[0])  # Use integer indices
+
+# Function to match input image with database images using BFMatcher
+def match_image(input_image_path):
+    input_descriptors = process_image(input_image_path)
+
+    bf = cv2.BFMatcher(cv2.NORM_L2)
+    matches = []
+
+    # Compare input descriptors with each set of stored descriptors
+    for db_desc in db_descriptors:
+        knn_matches = bf.knnMatch(input_descriptors, db_desc, k=2)
+        # Apply ratio test as per Lowe's paper
+        good_matches = [m for m, n in knn_matches if m.distance < 0.75 * n.distance]
+        matches.append(len(good_matches))
+
+    # Find the best matches
+    best_match_idx = np.argmax(matches)
+    best_match_score = matches[best_match_idx]
+
+    return db_image_paths[best_match_idx], db_room_texts[best_match_idx], best_match_score
+
+# Example usage:
+input_image_path = 'C:/testforinscriptions/input/testimage8.jpg'
+matched_image, matched_room_text, similarity_score = match_image(input_image_path)
+print("Matched Image:", matched_image)
+print("Room Text:", matched_room_text)
+print("Similarity Score:", similarity_score)

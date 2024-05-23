@@ -1,0 +1,65 @@
+import cv2
+import numpy as np
+from sqlalchemy import create_engine, MetaData, Table, Column, Integer, LargeBinary, ForeignKey
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import relationship
+from PIL import Image
+
+# Connect to the MySQL database
+MYSQL_USER = 'your_username'
+MYSQL_PASSWORD = 'your_password'
+MYSQL_HOST = 'localhost'
+DATABASE_NAME = 'Room_test'
+
+engine = create_engine(f"mysql+mysqlconnector://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}/{DATABASE_NAME}")
+
+# Define metadata
+metadata = MetaData()
+
+# Define table structure for storing descriptors
+descriptors_table = Table(
+    'descriptors', metadata,
+    Column('id', Integer, primary_key=True),
+    Column('descriptor', LargeBinary),
+    Column('room_testing_id', Integer, ForeignKey('Room_testing.id'))  # Foreign key relationship
+)
+
+# Create the table if it doesn't exist
+try:
+    metadata.create_all(engine)
+    print("Table 'descriptors' created successfully.")
+except SQLAlchemyError as e:
+    print(f"Error creating table: {e}")
+
+# Define function to detect features and compute descriptors using ORB and SIFT
+def detect_and_compute(image_path):
+    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    
+    # ORB feature detection
+    orb = cv2.ORB_create()
+    keypoints, descriptors_orb = orb.detectAndCompute(image, None)
+    
+    # SIFT descriptor computation
+    sift = cv2.SIFT_create()
+    keypoints, descriptors_sift = sift.compute(image, keypoints)
+    
+    return descriptors_sift
+
+# Process each image in the Room_testing table
+with engine.connect() as connection:
+    query = select([Room_testing_table_reflected])
+    result = connection.execute(query)
+    
+    for row in result:
+        image_path = row['image_path']
+        room_testing_id = row['id']
+        
+        # Detect features and compute descriptors
+        descriptors = detect_and_compute(image_path)
+        
+        # Insert descriptors into the database
+        for descriptor in descriptors:
+            try:
+                connection.execute(descriptors_table.insert().values(descriptor=descriptor.tobytes(), room_testing_id=room_testing_id))
+            except SQLAlchemyError as e:
+                print(f"Error inserting descriptor: {e}")

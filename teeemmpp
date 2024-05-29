@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Capture</title>
+    <style>
+        /* Add your CSS styling here */
+        video {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <button id="capture-btn">Capture Image</button>
+    <img id="captured-image" alt="Captured Image">
+    <video id="video" autoplay></video>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            let video = document.getElementById('video');
+            let canvas = document.createElement('canvas');
+            let context = canvas.getContext('2d');
+            
+            // Request camera access
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then(function(stream) {
+                    video.srcObject = stream;
+                })
+                .catch(function(error) {
+                    console.error('Error accessing camera:', error);
+                });
+
+            $('#capture-btn').click(function() {
+                if (video.srcObject) {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    const imageData = canvas.toDataURL('image/jpeg');
+                    document.getElementById('captured-image').src = imageData;
+                    
+                    // Send the captured image to the server
+                    $.ajax({
+                        url: '/upload-image',  // Replace with your actual endpoint
+                        type: 'POST',
+                        data: {
+                            image: imageData
+                        },
+                        success: function(response) {
+                            console.log('Image uploaded successfully:', response);
+                        },
+                        error: function(error) {
+                            console.error('Error uploading image:', error);
+                        }
+                    });
+                }
+            });
+        });
+    </script>
+</body>
+</html>

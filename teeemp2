@@ -1,0 +1,37 @@
+from flask import Flask, request, jsonify
+import base64
+from PIL import Image
+from io import BytesIO
+import os
+
+app = Flask(__name__)
+
+@app.route('/upload-image', methods=['POST'])
+def upload_image():
+    image_data = request.form['image']
+    # Remove the 'data:image/jpeg;base64,' prefix
+    image_data = image_data.replace('data:image/jpeg;base64,', '')
+    image_bytes = base64.b64decode(image_data)
+    
+    # Convert image bytes to a PIL Image
+    image = Image.open(BytesIO(image_bytes))
+    
+    # Convert image to grayscale
+    grayscale_image = image.convert('L')
+    
+    # Save the grayscale image to a file
+    if not os.path.exists('images'):
+        os.makedirs('images')
+    grayscale_image_path = 'images/grayscale_image.jpg'
+    grayscale_image.save(grayscale_image_path)
+    
+    # Convert the grayscale image to base64 to send back to the frontend
+    buffered = BytesIO()
+    grayscale_image.save(buffered, format="JPEG")
+    grayscale_image_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+    grayscale_image_data_url = f"data:image/jpeg;base64,{grayscale_image_base64}"
+    
+    return jsonify({'status': 'success', 'message': 'Image uploaded and processed successfully', 'grayscale_image': grayscale_image_data_url}), 200
+
+if __name__ == '__main__':
+    app.run(debug=True)

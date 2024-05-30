@@ -1,0 +1,63 @@
+import os
+import cv2
+from sqlalchemy import create_engine, Table, Column, LargeBinary, Integer, MetaData, insert
+import pickle
+import numpy as np
+
+def list_of_image_paths(folder_path):
+    image_list = []
+    for filename in os.listdir(folder_path):
+        if filename.endswith(('.png','.jpg','.jpeg','.webp')):
+            image_list.append(os.path.join(folder_path,filename))
+    return image_list
+
+def extract_descriptors(image):
+    fast = cv2.FastFeatureDetector_create()
+    kpt = fast.detect(image)
+    sift = cv2.SIFT_create()
+    _, descriptors = sift.compute(image, kpt)
+    return descriptors
+
+folder_path = 'C:/testforinscriptions/iitimages'
+image_list = list_of_image_paths(folder_path)
+
+engine = create_engine("sqlite:///hello.sqlite")
+connection = engine.connect()
+metadata = MetaData()
+sample = Table('a', metadata,
+               Column('id', Integer),
+               Column('Image_data', LargeBinary),
+               Column('Descriptors', LargeBinary)  # Add a column to store descriptors
+               )
+metadata.create_all(engine)
+metadata.reflect(bind=engine)
+
+if 'a' in metadata.tables:
+    a1 = metadata.tables['a']
+    op = insert(a1)
+    records = []
+
+    for index, convertor in enumerate(image_list):
+        word_splitter = os.path.splitext(convertor)[1].lower()
+        img = cv2.imread(convertor)
+
+        # Extract descriptors
+        descriptors = extract_descriptors(img)
+
+        # Convert descriptors to bytes
+        descriptors_bytes = pickle.dumps(descriptors)
+
+        # Convert image to bytes
+        _, image_bin_for = cv2.imencode(word_splitter, img)
+        image_bytes = image_bin_for.tobytes()
+
+        temp1 = {'id': index, 'Image_data': image_bytes, 'Descriptors': descriptors_bytes}
+        records.append(temp1)
+
+    connection.execute(op, records)
+    print("Rows Inserted")
+else:
+    print("There is no such database")
+
+connection.commit()
+connection.close()

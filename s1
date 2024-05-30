@@ -1,0 +1,53 @@
+import numpy as np
+import pickle
+import cv2
+from sqlalchemy import MetaData, create_engine, text
+from sklearn.neighbors import KDTree
+
+engine = create_engine("sqlite:///hello.sqlite")
+metadata = MetaData()
+metadata.reflect(engine)
+connection = engine.connect()
+
+if 'a' in metadata.tables:
+    a1 = metadata.tables['a']
+    stmt = text('select * from a')
+    result = connection.execute(stmt).fetchall()
+else:
+    print("Tables doesn't exist")
+
+
+desc_list = []
+for samp in result:
+    if samp[2] is not None:  # Check if the value is not None
+        x = pickle.loads(samp[2])
+        desc_list.append(x)
+    else:
+        print("Descriptors not found for image:", samp[0])
+query_img = cv2.imread('C:/testforinscriptions/input/input4.jpeg')
+
+
+fast = cv2.FastFeatureDetector_create()
+query_keypoints = fast.detect(query_img)
+sift = cv2.SIFT_create()
+query_keypoints , query_dpt = sift.compute(query_img,query_keypoints)
+
+
+good_matches = []
+for index,dpt in enumerate(desc_list):
+    kdtree = KDTree(dpt)
+    distance , indices = kdtree.query(query_dpt , k = 2)
+    z = distance[index].tolist()
+    m,n = z
+    if m < 0.5*n:
+       good_matches.append(distance)
+    else:
+       continue
+    if len(good_matches) != 0:
+       z = np.frombuffer(result[index][1] , np.uint8)
+       img = cv2.imdecode(z,cv2.IMREAD_GRAYSCALE)
+       print("The image matched in the database is with index",index)
+       cv2.imshow("Image",img)
+       cv2.waitKey(0)
+connection.commit()
+connection.close()

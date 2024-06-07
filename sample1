@@ -1,0 +1,76 @@
+import os
+import cv2
+from sqlalchemy import create_engine, Table, Column, LargeBinary, Integer,Text, MetaData, insert
+import pickle
+import numpy as np
+
+def list_of_image_paths(folder_path):
+    image_list = []
+    for filename in os.listdir(folder_path):
+        if filename.endswith(('.png','.jpg','.jpeg','.webp')):
+            image_list.append(os.path.join(folder_path,filename))
+    return image_list
+
+def extract_descriptors(image):
+# ORB for keypoint detection
+fast1= cv2.FastFeatureDetector_create()
+kpt = fast1.detect(image)
+sift = cv2.SIFT_create()
+_, descriptors = sift.compute(image, kpt)
+return descriptors
+
+def binarized_image(image_path):
+    img = cv2.imread(image_path,cv2.IMREAD_GRAYSCALE)
+    height, width = img.shape[:2]
+    resized_img = cv2.resize(img, (int(0.25 * width), int(0.25 * height)))
+    equalized_image = cv2.equalizeHist(resized_img)
+    _, bin_image = cv2.threshold(equalized_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return bin_image
+
+    
+folder_path = 'C:/testforinscriptions/Inscriptionsimages'
+image_list = list_of_image_paths(folder_path)
+
+engine = create_engine("sqlite:///hellodd.sqlite")
+connection = engine.connect()
+metadata = MetaData()
+sample = Table('a', metadata,
+               Column('id', Integer),
+               Column('Image_data', LargeBinary),
+               Column('Descriptors', LargeBinary), 
+               Column('Text',Text)
+               )
+metadata.create_all(engine)
+metadata.reflect(bind=engine)
+
+if 'a' in metadata.tables:
+    a1 = metadata.tables['a']
+    op = insert(a1)
+    records = []
+
+    for index, convertor in enumerate(image_list):
+        word_splitter = os.path.splitext(convertor)[1].lower()
+        img = binarized_image(convertor)
+
+        # Extract descriptors
+        descriptors = extract_descriptors(img)
+
+        # Convert descriptors to bytes
+        descriptors_bytes = pickle.dumps(descriptors)
+
+        # Convert image to bytes
+        _, image_bin_for = cv2.imencode(word_splitter, img)
+        image_bytes = image_bin_for.tobytes()
+
+        text_ret = 'Text {}'.format(index)
+
+        temp1 = {'id': index, 'Image_data': image_bytes, 'Descriptors': descriptors_bytes, 'Text': text_ret}
+        records.append(temp1)
+
+    connection.execute(op, records)
+    print(index+1,"Rows Inserted")
+else:
+    print("There is no such database")
+
+connection.commit()
+connection.close()

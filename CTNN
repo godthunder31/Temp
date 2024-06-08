@@ -1,0 +1,188 @@
+import cv2
+import numpy as np
+from sklearn.cluster import KMeans
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import sqlite3
+import pickle
+import os
+import pyopencl as cl
+# Step 1: Create database of images of inscriptions
+
+# Connect to SQLite database
+conn = sqlite3.connect('inscriptions.db')
+cursor = conn.cursor()
+
+# Create table for image descriptors
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS image_descriptors (
+        id INTEGER PRIMARY KEY,
+        image_path TEXT,
+        descriptors BLOB
+    )
+''')
+
+
+# Function to preprocess image and extract descriptors
+def preprocess_image(image_path):
+    # Load image using OpenCV
+    image = cv2.imread(image_path)
+    if image is None:
+        print(f"Error: Unable to read image '{image_path}'")
+        return None
+    # Slice image into square bits
+    square_size = 32
+    image_slices = []
+    for i in range(0, image.shape[0], square_size):
+        for j in range(0, image.shape[1], square_size):
+            slice_ = image[i:i+square_size, j:j+square_size]
+            if slice_.shape[:2] == (square_size, square_size):
+                image_slices.append(slice_)
+    # Vectorize square bits using histograms
+    histograms = []
+    for slice_ in image_slices:
+        hist = cv2.calcHist([slice_], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
+        histograms.append(hist.flatten())
+
+    # Convert histograms to descriptors
+    descriptors = np.array(histograms)
+    if np.isnan(descriptors).any():
+        print("NaN values found in descriptors!")
+    
+    return descriptors
+
+# Function to cluster descriptors using K-Means
+def cluster_descriptors(descriptors):
+    if descriptors is None or len(descriptors) == 0:
+        return [], None
+    kmeans = KMeans(n_clusters=10)
+    kmeans.fit(descriptors)
+    centroids = kmeans.cluster_centers_
+    labels = kmeans.labels_
+
+    # Prune out clusters with too many elements
+    cluster_sizes = np.bincount(labels)
+    max_cluster_size = 100
+    pruned_labels = []
+    for label in labels:
+        if cluster_sizes[label] <= max_cluster_size:
+            pruned_labels.append(label)
+        else:
+            pruned_labels.append(-1)
+
+    return pruned_labels, centroids
+
+# Function to convert image to document containing cluster IDs
+def image_to_document(image_path):
+    descriptors = preprocess_image(image_path)
+    if descriptors is None:
+        return ""
+    labels, _ = cluster_descriptors(descriptors)
+    document = ' '.join(map(str, labels))
+    return document
+
+def list_of_image_paths(folder_path):
+    image_list = []
+    for root, dirs, files in os.walk(folder_path):
+        for file in files:
+            if file.endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                image_list.append(os.path.join(root, file))
+    return image_list
+            
+    
+# Directory containing images
+folder_path = 'C:/testforinscriptions/Inscriptionsimages'
+image_paths = list_of_image_paths(folder_path)
+
+# Process and insert images into the database
+for image_path in image_paths:
+    descriptors = preprocess_image(image_path)
+    if descriptors is not None:
+        cursor.execute('INSERT INTO image_descriptors (image_path, descriptors) VALUES (?, ?)',
+                       (image_path, pickle.dumps(descriptors)))
+
+conn.commit()
+
+# Step 2: Query image matching
+
+# Function to search for image patch in query image
+def search_image_patch(query_image_path, database_images):
+    # Extract descriptors from query image
+    query_descriptors = preprocess_image(query_image_path)
+    if query_descriptors is None:
+        return []
+    # Create convolutional filter
+    filter_size = 32
+    filter_ = np.zeros((filter_size, filter_size, query_descriptors.shape[1]))
+    for i in range(filter_size):
+        for j in range(filter_size):
+            if i * filter_size + j < len(query_descriptors):
+                filter_[i, j] = query_descriptors[i*filter_size + j]
+
+    ctx = cl.create_some_context()
+    queue = cl.CommandQueue(ctx)
+    mf = cl.mem_flags
+    filter_buf = cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=filter_)
+    descriptors_buf = cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=query_descriptors)
+
+    prg = cl.Program(ctx, """
+        __kernel void convolve(__global float *filter, __global float *descriptors, __global float *correlation) {
+            int filter_size = 32;
+            int i = get_global_id(0);
+            int j = get_global_id(1);
+            float sum = 0;
+            for (int k = 0; k < filter_size; k++) {
+                sum += filter[i*filter_size + k] * descriptors[j*filter_size + k];
+            }
+            correlation[i*filter_size + j] = sum;
+        }
+    """).build()
+    correlation_buf = cl.Buffer(ctx, mf.WRITE_ONLY, size=descriptors.shape[0] * filter_size)
+    prg.convolve(queue, (descriptors.shape[0], filter_size), None, filter_buf, descriptors_buf, correlation_buf)
+    correlation = np.empty_like(descriptors)
+    cl.enqueue_copy(queue, correlation, correlation_buf)
+
+    # Search for filter in database images
+    matched_images = []
+    for image_path, descriptors in database_images:
+        descriptors = pickle.loads(descriptors)
+        correlation = cv2.filter2D(descriptors, -1, filter_)
+        max_correlation = np.max(correlation)
+        if max_correlation > 0.5:
+            matched_images.append((image_path, max_correlation))
+
+    return matched_images
+
+# Function to apply TF-IDF to documents
+def apply_tfidf(documents):
+    vectorizer = TfidfVectorizer()
+    tfidf_matrix = vectorizer.fit_transform(documents)
+    return tfidf_matrix
+
+# Function to compute cosine similarity between query document and database documents
+def compute_cosine_similarity(query_document, database_documents):
+    tfidf_matrix = apply_tfidf([query_document] + database_documents)
+    cosine_similarities = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:])
+    return cosine_similarities
+
+# Query image matching
+query_image_path = 'C:/testforinscriptions/input/inputed.jpg'
+query_document = image_to_document(query_image_path)
+
+# Retrieve database images and documents
+cursor.execute('SELECT image_path, descriptors FROM image_descriptors')
+database_images = cursor.fetchall()
+database_documents = [image_to_document(image_path) for image_path, _ in database_images]
+
+# Search for image patch in query image
+matched_images = search_image_patch(query_image_path, database_images)
+
+# Apply TF-IDF and compute cosine similarity
+cosine_similarities = compute_cosine_similarity(query_document, database_documents)
+
+# Rule-based thresholding
+top_n = 5
+matched_images = np.argsort(-cosine_similarities[0])[:top_n]
+print("Top", top_n, "matched images:")
+for i in matched_images:
+    print(database_images[i][0], cosine_similarities[0, i])

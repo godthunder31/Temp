@@ -1,0 +1,33 @@
+import cv2
+import pytesseract
+
+# Load the image
+img = cv2.imread('/Users/apple/Downloads/inscription_image.jpeg')
+
+# Convert the image to grayscale
+gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+# Apply thresholding to binarize the image
+_, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+# Use Tesseract OCR to detect text regions
+text_regions = pytesseract.image_to_boxes(thresh, lang='eng', config='--psm 11')
+
+# Parse the text regions to identify keypoints
+keypoints = []
+for region in text_regions.splitlines():
+    x, y, w, h = map(int, region.split()[:4])
+    keypoints.append((x, y))
+    keypoints.append((x + w, y))
+    keypoints.append((x, y + h))
+    keypoints.append((x + w, y + h))
+
+# Draw keypoints on the original image
+img_with_keypoints = img.copy()
+for point in keypoints:
+    cv2.circle(img_with_keypoints, point, 3, (0, 255, 0), -1)
+
+# Display the image with keypoints
+cv2.imshow("Image with Keypoints", img_with_keypoints)
+cv2.waitKey(0)
+cv2.destroyAllWindows()

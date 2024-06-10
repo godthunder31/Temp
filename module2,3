@@ -1,0 +1,98 @@
+import numpy as np
+import pickle
+import cv2
+from sqlalchemy import MetaData, create_engine, text
+from sklearn.neighbors import KDTree
+
+# Connect to the SQLite database
+engine = create_engine("sqlite:///zxcv.sqlite")
+metadata = MetaData()
+metadata.reflect(engine)
+connection = engine.connect()
+
+# Check if the table 'a' exists and fetch its contents
+if 'a' in metadata.tables:
+    a1 = metadata.tables['a']
+    stmt = text('SELECT * FROM a')
+    result = connection.execute(stmt).fetchall()
+else:
+    print("Tables don't exist")
+    result = []
+
+# Extract descriptors from the database and store the associated indices
+desc_list = []
+index_list = []
+for index, samp in enumerate(result):
+    if samp[2] is not None:
+        x = pickle.loads(samp[2])
+        desc_list.append(x)
+        index_list.extend([index] * x.shape[0])
+    else:
+        print("Descriptors not found for image:", samp[0])
+
+# Combine all descriptors into a single array
+if desc_list:
+    all_descriptors = np.vstack(desc_list)
+else:
+    all_descriptors = np.array([])
+
+print("Total descriptors loaded:", all_descriptors.shape)
+
+# Function to binarize an image
+def binarized_image(image_path):
+    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    height, width = img.shape[:2]
+    resized_img = cv2.resize(img, (int(0.25 * width), int(0.25 * height)))
+    equalized_image = cv2.equalizeHist(resized_img)
+    _, bin_image = cv2.threshold(equalized_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return bin_image      
+
+# Load and binarize the query image
+query_img_path = 'C:/testforinscriptions/input/6.jpg'
+query_img = binarized_image(query_img_path)
+
+# Detect keypoints and compute descriptors for the query image
+orb = cv2.ORB_create(nfeatures=200)
+query_keypoints = orb.detect(query_img, None)
+sift = cv2.SIFT_create()
+query_keypoints, query_dpt = sift.compute(query_img, query_keypoints)
+print("Total keypoints detected in query image:", len(query_keypoints))
+
+# Visualize query image keypoints
+query_img_keypoints = cv2.drawKeypoints(query_img, query_keypoints, None, color=(0,255,0))
+cv2.imshow("Query Image Keypoints", query_img_keypoints)
+cv2.waitKey(0) 
+cv2.destroyAllWindows()
+
+print("Query Image Descriptors Sample:", query_dpt[:5])
+print("Database Descriptors Sample:", all_descriptors[:5])
+
+# Build a single KDTree for all database descriptors
+kdtree = KDTree(all_descriptors)
+
+# Find good matches using Lowe's ratio test
+distances, indices = kdtree.query(query_dpt, k=2)
+print("Distances Sample:", distances[:5])
+print("Indices Sample:", indices[:5])
+
+good_matches = []
+
+for i, (m, n) in enumerate(distances):
+    if m < 0.9 * n:  # Lowe's ratio test
+        good_matches.append((indices[i][0], m))
+        db_index = index_list[indices[i][0]]
+        text_associated = result[db_index][3]  # Retrieve the text from the same row
+        print("The text associated with the matched image is:", text_associated)
+
+        z = np.frombuffer(result[db_index][1], np.uint8)
+        matched_img = cv2.imdecode(z, cv2.IMREAD_COLOR)
+        print("Matched Image Index:", db_index)
+        cv2.imshow("Matched Image", matched_img)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        break
+
+if not good_matches:
+    print("No good matches found.")
+# Close the database connection
+connection.close()

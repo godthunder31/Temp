@@ -1,0 +1,51 @@
+import cv2
+import pytesseract
+import langdetect
+from PIL import Image
+
+def detect_ancient_script(text):
+    # Implement ancient script detection logic here
+    # For example, you can use a machine learning model to classify the script
+    # or use a rule-based approach to detect specific script features
+
+    # Load a machine learning model for ancient script detection
+    model = cv2.dnn.readNetFromDarknet("ancient_script_detection_model.cfg", "ancient_script_detection_model.weights")
+
+    # Pre-process the text image
+    img = cv2.imread(text)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+
+    # Extract features from the text image
+    features = cv2.HOGDescriptor_getDefaultPeopleDetector()
+    (H, hogImage) = features.compute(thresh)
+
+    # Classify the script using the machine learning model
+    outputs = model.forward(hogImage)
+    _, class_id = outputs.topk(1)
+
+    # Map the class ID to an ancient script label
+    script_labels = ["Egyptian Hieroglyphs", "Ancient Greek", "Latin", "Sanskrit", "Chinese Characters"]
+    script_label = script_labels[class_id]
+
+    return script_label
+
+def ocr_image(image_path):
+    img = cv2.imread(image_path)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+
+    custom_config = r'--oem 3 --psm 6'
+    text = pytesseract.image_to_string(thresh, config=custom_config)
+
+    language = detect_language(text)
+    ancient_script = detect_ancient_script(text)
+
+    return text, language, ancient_script
+
+image_path = 'image.jpg'
+text, language, ancient_script = ocr_image(image_path)
+
+print(f'Text: {text}')
+print(f'Language: {language}')
+print(f'Ancient Script: {ancient_script}')

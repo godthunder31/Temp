@@ -4,28 +4,12 @@ import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.feature_extraction.text import TfidfVectorizer
 import sqlite3
-'''def tile_images(input_folder, num_tiles):
-    image_files = [os.path.join(input_folder, f) for f in os.listdir(input_folder) if f.endswith('.jpg')]
-    tiles = []
-    for image_file in image_files:
-        img = cv2.imread(image_file)
-        height, width, _ = img.shape
-        tile_height = height // int(np.sqrt(num_tiles))
-        tile_width = width // int(np.sqrt(num_tiles))
-        for i in range(int(np.sqrt(num_tiles))):
-            for j in range(int(np.sqrt(num_tiles))):
-                y = i * tile_height
-                x = j * tile_width
-                tile = img[y:y+tile_height, x:x+tile_width]
-                tiles.append(tile)
-    return tiles'''
 # Step 1: Tiling of images with input folder containing n images
 def tile_images(input_folder, num_tiles):
     image_files = [os.path.join(input_folder, f) for f in os.listdir(input_folder) if f.endswith('.jpg')]
     if not image_files:
         print(f"No image files found in the directory: {input_folder}")
         return []
-    
     tiles = []
     for image_file in image_files:
         img = cv2.imread(image_file)
@@ -114,7 +98,7 @@ def create_database(cluster_vocabulary, output_db='image_documents.db'):
     conn.close()
 
 # Step 9: Determine importance of clusters
-def determine_importance(cluster_vocabulary):
+'''def determine_importance(cluster_vocabulary):
     importance = {}
     num_docs, num_features = cluster_vocabulary.shape
     for i in range(num_docs):
@@ -125,20 +109,44 @@ def determine_importance(cluster_vocabulary):
                     importance[j] = 0
                 importance[j] += 1
     #print("Importance:", importance)  # Debug print statement
-    return importance
+    return importance'''
+def determine_importance(cluster_vocabulary):
+    importance = {}
+    num_docs, num_features = cluster_vocabulary.shape
+    for i in range(num_docs):
+        doc = cluster_vocabulary[i].toarray().flatten()  # Convert csr_matrix to dense array
+        for j, value in enumerate(doc):
+            if value!= 0:
+                if j not in importance:
+                    importance[j] = 0
+                importance[j] += 1
+    
+    # Calculate document frequency (DF) for each cluster
+    cluster_df = {}
+    for cluster, freq in importance.items():
+        cluster_df[cluster] = freq
+    
+    # Calculate inverse document frequency (IDF) for each cluster
+    cluster_idf = {}
+    for cluster, df in cluster_df.items():
+        idf = np.log(num_docs / df)
+        cluster_idf[cluster] = idf
+    
+    # Calculate TF-IDF score for each cluster in each document
+    tfidf_scores = []
+    for doc in cluster_vocabulary:
+        doc_tfidf = {}
+        for cluster, freq in enumerate(doc.toarray().flatten()):
+            tf = freq  # term frequency
+            idf = cluster_idf[cluster]
+            tfidf = tf * idf
+            doc_tfidf[cluster] = tfidf
+        tfidf_scores.append(doc_tfidf)
+    
+    return importance, tfidf_scores
 
 # Step 10: Given a new image, determine patches
-'''def determine_patches(new_image, num_tiles):
-    img = cv2.imread(new_image)
-    height, width, _ = img.shape
-    tile_size = int(np.sqrt(height * width / num_tiles))
-    patches = []
-    for i in range(num_tiles):
-        x = (i % int(np.sqrt(num_tiles))) * tile_size
-        y = (i // int(np.sqrt(num_tiles))) * tile_size
-        patch = img[y:y+tile_size, x:x+tile_size]
-        patches.append(patch)
-    return patches'''
+
 def determine_patches(new_image, num_tiles):
     img = cv2.imread(new_image)
     height, width, _ = img.shape
@@ -163,12 +171,19 @@ def determine_closest_clusters(patches, kmeans):
     return closest_clusters
 
 # Step 12: Filter-out non tf-idf clusters
-def filter_out_non_tfidf_clusters(closest_clusters, importance):
+'''def filter_out_non_tfidf_clusters(closest_clusters, importance):
+    filtered_clusters = []
+    for cluster in closest_clusters:
+        if importance.get(cluster, 0) in [1, 2]:  # Filter based on importance
+            filtered_clusters.append(cluster)
+    return filtered_clusters'''
+def filter_out_non_tfidf_clusters(closest_clusters, importance, tfidf_scores):
     filtered_clusters = []
     for cluster in closest_clusters:
         if importance.get(cluster, 0) in [1, 2]:  # Filter based on importance
             filtered_clusters.append(cluster)
     return filtered_clusters
+
 
 
 # Step 13: Visually inspect
@@ -213,22 +228,6 @@ def mark_center_of_detected_points(filtered_clusters, new_image):
     cv2.destroyAllWindows()
 
 # Step 15: Create a dataset for mapping
-'''def create_dataset(tiles, filtered_clusters, output_folder='dataset'):
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
-    x_data = []
-    y_data = []
-    for i, tile in enumerate(tiles):
-        gray = cv2.cvtColor(tile, cv2.COLOR_BGR2GRAY)
-        x_data.append(tile)
-        if i in filtered_clusters:
-            y_data.append(1)
-        else:
-            y_data.append(0)
-    x_data = np.array(x_data)
-    y_data = np.array(y_data)
-    np.save(os.path.join(output_folder, 'x_data.npy'), x_data)
-    np.save(os.path.join(output_folder, 'y_data.npy'), y_data)'''
 def create_dataset(tiles, filtered_clusters, output_folder='dataset1'):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
@@ -281,8 +280,8 @@ disable_tfidf_flags(tfidf)
 create_database(cluster_vocabulary)
 
 # Step 9
-importance = determine_importance(cluster_vocabulary)
-
+#importance = determine_importance(cluster_vocabulary)
+importance, tfidf_scores = determine_importance(cluster_vocabulary)
 # Step 10
 patches = determine_patches(new_image, num_tiles)
 
@@ -290,7 +289,7 @@ patches = determine_patches(new_image, num_tiles)
 closest_clusters = determine_closest_clusters(patches, kmeans)
 
 # Step 12
-filtered_clusters = filter_out_non_tfidf_clusters(closest_clusters, importance)
+filtered_clusters = filter_out_non_tfidf_clusters(closest_clusters, importance,tfidf_scores)
 if filtered_clusters:
     visually_inspect(filtered_clusters, new_image)
 else:
@@ -301,5 +300,4 @@ else:
 # Step 14
 mark_center_of_detected_points(filtered_clusters, new_image)
 
-# Step 15
 create_dataset(tiles, filtered_clusters)

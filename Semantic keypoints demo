@@ -4,20 +4,51 @@ import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.feature_extraction.text import TfidfVectorizer
 import sqlite3
-
-# Step 1: Tiling of images with input folder containing n images
-def tile_images(input_folder, num_tiles):
+'''def tile_images(input_folder, num_tiles):
     image_files = [os.path.join(input_folder, f) for f in os.listdir(input_folder) if f.endswith('.jpg')]
     tiles = []
     for image_file in image_files:
         img = cv2.imread(image_file)
         height, width, _ = img.shape
+        tile_height = height // int(np.sqrt(num_tiles))
+        tile_width = width // int(np.sqrt(num_tiles))
+        for i in range(int(np.sqrt(num_tiles))):
+            for j in range(int(np.sqrt(num_tiles))):
+                y = i * tile_height
+                x = j * tile_width
+                tile = img[y:y+tile_height, x:x+tile_width]
+                tiles.append(tile)
+    return tiles'''
+# Step 1: Tiling of images with input folder containing n images
+def tile_images(input_folder, num_tiles):
+    image_files = [os.path.join(input_folder, f) for f in os.listdir(input_folder) if f.endswith('.jpg')]
+    if not image_files:
+        print(f"No image files found in the directory: {input_folder}")
+        return []
+    
+    tiles = []
+    for image_file in image_files:
+        img = cv2.imread(image_file)
+        if img is None:
+            print(f"Failed to read image: {image_file}")
+            continue
+        height, width, _ = img.shape
         tile_size = int(np.sqrt(height * width / num_tiles))
+        
+        # Debugging statements
+        print(f"Image: {image_file}, Height: {height}, Width: {width}, Tile size: {tile_size}")
+
         for i in range(num_tiles):
             x = (i % int(np.sqrt(num_tiles))) * tile_size
             y = (i // int(np.sqrt(num_tiles))) * tile_size
-            tile = img[y:y+tile_size, x:x+tile_size]
-            tiles.append(tile)
+            if x + tile_size <= width and y + tile_size <= height:
+                tile = img[y:y+tile_size, x:x+tile_size]
+                tiles.append(tile)
+            else:
+                print(f"Skipping tile at (x={x}, y={y}) - out of bounds")
+    
+    if not tiles:
+        print("No tiles generated. Check the tile size and image dimensions.")
     return tiles
 
 # Step 2: Store tiles in a new directory
@@ -25,16 +56,25 @@ def store_tiles(tiles, output_folder):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
     for i, tile in enumerate(tiles):
+        if tile is not None and not np.any(tile):
+            print(f"Skipping empty tile: tile_{i}.jpg")
+            continue
         cv2.imwrite(os.path.join(output_folder, f'tile_{i}.jpg'), tile)
 
 # Step 3: Perform Clustering on tiles
 def cluster_tiles(tiles, k):
     tile_features = []
     for tile in tiles:
+        if tile is None or not np.any(tile):
+            print("Skipping empty or invalid tile")
+            continue
         gray = cv2.cvtColor(tile, cv2.COLOR_BGR2GRAY)
         gray_resized = cv2.resize(gray, (32, 32)).flatten()  # Resizing for dimensional consistency
         tile_features.append(gray_resized)
     tile_features = np.array(tile_features)
+    if tile_features.size == 0:  # Check if tile_features is empty after filtering out invalid tiles
+        print("No valid tiles found for clustering")
+        return None
     kmeans = KMeans(n_clusters=k)
     kmeans.fit(tile_features)
     return kmeans
@@ -67,22 +107,28 @@ def create_database(cluster_vocabulary, output_db='image_documents.db'):
     c = conn.cursor()
     c.execute('CREATE TABLE IF NOT EXISTS documents (id INTEGER PRIMARY KEY, document TEXT)')
     for i, doc in enumerate(cluster_vocabulary):
-        c.execute('INSERT INTO documents (id, document) VALUES (?,?)', (i, doc))
+        doc_array = doc.toarray().tolist()[0]  # Convert csr_matrix to dense array
+        doc_str = ','.join(map(str, doc_array))  # Convert array to comma-separated string
+        c.execute('INSERT INTO documents (document) VALUES (?)', (doc_str,))
     conn.commit()
     conn.close()
 
 # Step 9: Determine importance of clusters
 def determine_importance(cluster_vocabulary):
     importance = {}
-    for doc in cluster_vocabulary:
-        for cluster in doc.split():
-            if cluster not in importance:
-                importance[cluster] = 0
-            importance[cluster] += 1
+    num_docs, num_features = cluster_vocabulary.shape
+    for i in range(num_docs):
+        doc = cluster_vocabulary[i].toarray().flatten()  # Convert csr_matrix to dense array
+        for j, value in enumerate(doc):
+            if value != 0:
+                if j not in importance:
+                    importance[j] = 0
+                importance[j] += 1
+    #print("Importance:", importance)  # Debug print statement
     return importance
 
 # Step 10: Given a new image, determine patches
-def determine_patches(new_image, num_tiles):
+'''def determine_patches(new_image, num_tiles):
     img = cv2.imread(new_image)
     height, width, _ = img.shape
     tile_size = int(np.sqrt(height * width / num_tiles))
@@ -92,6 +138,18 @@ def determine_patches(new_image, num_tiles):
         y = (i // int(np.sqrt(num_tiles))) * tile_size
         patch = img[y:y+tile_size, x:x+tile_size]
         patches.append(patch)
+    return patches'''
+def determine_patches(new_image, num_tiles):
+    img = cv2.imread(new_image)
+    height, width, _ = img.shape
+    tile_size = int(np.sqrt(height * width / num_tiles))
+    patches = []
+    for i in range(num_tiles):
+        x = (i % int(np.sqrt(num_tiles))) * tile_size
+        y = (i // int(np.sqrt(num_tiles))) * tile_size
+        if x + tile_size <= width and y + tile_size <= height:
+            patch = img[y:y+tile_size, x:x+tile_size]
+            patches.append(patch)
     return patches
 
 # Step 11: Determine closest clusters
@@ -108,40 +166,54 @@ def determine_closest_clusters(patches, kmeans):
 def filter_out_non_tfidf_clusters(closest_clusters, importance):
     filtered_clusters = []
     for cluster in closest_clusters:
-        if importance[str(cluster)] > 1:  # Filter based on importance
+        if importance.get(cluster, 0) in [1, 2]:  # Filter based on importance
             filtered_clusters.append(cluster)
     return filtered_clusters
 
+
 # Step 13: Visually inspect
 def visually_inspect(filtered_clusters, new_image):
+    if not filtered_clusters:
+        print("No clusters to inspect.")
+        return
     img = cv2.imread(new_image)
     height, width, _ = img.shape
-    tile_size = int(np.sqrt(height * width / len(filtered_clusters)))
+    num_tiles = int(np.sqrt(len(filtered_clusters)))
+    tile_size = min(height // num_tiles, width // num_tiles)
     for i, cluster in enumerate(filtered_clusters):
-        x = (i % int(np.sqrt(len(filtered_clusters)))) * tile_size
-        y = (i // int(np.sqrt(len(filtered_clusters)))) * tile_size
+        x = (i % num_tiles) * tile_size
+        y = (i // num_tiles) * tile_size
         cv2.rectangle(img, (x, y), (x+tile_size, y+tile_size), (0, 255, 0), 2)
-    cv2.imshow('Inspected Image', img)
+    resized_img = cv2.resize(img, (800, 800))  # Adjust dimensions as needed
+    cv2.imshow('Inspected Image', resized_img)    
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
 # Step 14: Mark center of the detected points
 def mark_center_of_detected_points(filtered_clusters, new_image):
+    if not filtered_clusters:
+        print("No clusters to mark.")
+        return
     img = cv2.imread(new_image)
     height, width, _ = img.shape
-    tile_size = int(np.sqrt(height * width / len(filtered_clusters)))
+    if filtered_clusters:
+        tile_size = int(np.sqrt(height * width / len(filtered_clusters)))
+    else:
+        print("No clusters to mark. Skipping...")
+        return
     for i, cluster in enumerate(filtered_clusters):
         x = (i % int(np.sqrt(len(filtered_clusters)))) * tile_size
         y = (i // int(np.sqrt(len(filtered_clusters)))) * tile_size
         center_x = x + tile_size // 2
         center_y = y + tile_size // 2
         cv2.circle(img, (center_x, center_y), 5, (0, 0, 255), -1)
-    cv2.imshow('Detected Points', img)
+    resized_img = cv2.resize(img, (800, 800))  # Adjust dimensions as needed
+    cv2.imshow('Detected Points', resized_img)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
 # Step 15: Create a dataset for mapping
-def create_dataset(tiles, filtered_clusters, output_folder='dataset'):
+'''def create_dataset(tiles, filtered_clusters, output_folder='dataset'):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
     x_data = []
@@ -156,12 +228,31 @@ def create_dataset(tiles, filtered_clusters, output_folder='dataset'):
     x_data = np.array(x_data)
     y_data = np.array(y_data)
     np.save(os.path.join(output_folder, 'x_data.npy'), x_data)
+    np.save(os.path.join(output_folder, 'y_data.npy'), y_data)'''
+def create_dataset(tiles, filtered_clusters, output_folder='dataset1'):
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    max_height = max(tile.shape[0] for tile in tiles)
+    max_width = max(tile.shape[1] for tile in tiles)
+    x_data = []
+    y_data = []
+    for i, tile in enumerate(tiles):
+        padded_tile = np.zeros((max_height, max_width, 3), dtype=np.uint8)
+        padded_tile[:tile.shape[0], :tile.shape[1], :] = tile
+        x_data.append(padded_tile)
+        if i in filtered_clusters:
+            y_data.append(1)
+        else:
+            y_data.append(0)
+    x_data = np.array(x_data)
+    y_data = np.array(y_data)
+    np.save(os.path.join(output_folder, 'x_data.npy'), x_data)
     np.save(os.path.join(output_folder, 'y_data.npy'), y_data)
 
 # Example usage
-input_folder = '/path/to/input_images'
-output_folder = '/path/to/tiled_images'
-new_image = '/path/to/new_image.jpg'
+input_folder = 'C:/testforinscriptions/dataset/images'
+output_folder = 'C:/testforinscriptions/semantic/output'
+new_image = 'C:/testforinscriptions/input/58.jpg'
 num_tiles = 10
 k = 100
 
@@ -200,9 +291,12 @@ closest_clusters = determine_closest_clusters(patches, kmeans)
 
 # Step 12
 filtered_clusters = filter_out_non_tfidf_clusters(closest_clusters, importance)
-
+if filtered_clusters:
+    visually_inspect(filtered_clusters, new_image)
+else:
+    print("No clusters to inspect.")
 # Step 13
-visually_inspect(filtered_clusters, new_image)
+#visually_inspect(filtered_clusters, new_image)
 
 # Step 14
 mark_center_of_detected_points(filtered_clusters, new_image)

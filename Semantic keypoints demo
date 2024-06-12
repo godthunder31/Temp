@@ -1,0 +1,211 @@
+import os
+import cv2
+import numpy as np
+from sklearn.cluster import KMeans
+from sklearn.feature_extraction.text import TfidfVectorizer
+import sqlite3
+
+# Step 1: Tiling of images with input folder containing n images
+def tile_images(input_folder, num_tiles):
+    image_files = [os.path.join(input_folder, f) for f in os.listdir(input_folder) if f.endswith('.jpg')]
+    tiles = []
+    for image_file in image_files:
+        img = cv2.imread(image_file)
+        height, width, _ = img.shape
+        tile_size = int(np.sqrt(height * width / num_tiles))
+        for i in range(num_tiles):
+            x = (i % int(np.sqrt(num_tiles))) * tile_size
+            y = (i // int(np.sqrt(num_tiles))) * tile_size
+            tile = img[y:y+tile_size, x:x+tile_size]
+            tiles.append(tile)
+    return tiles
+
+# Step 2: Store tiles in a new directory
+def store_tiles(tiles, output_folder):
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    for i, tile in enumerate(tiles):
+        cv2.imwrite(os.path.join(output_folder, f'tile_{i}.jpg'), tile)
+
+# Step 3: Perform Clustering on tiles
+def cluster_tiles(tiles, k):
+    tile_features = []
+    for tile in tiles:
+        gray = cv2.cvtColor(tile, cv2.COLOR_BGR2GRAY)
+        gray_resized = cv2.resize(gray, (32, 32)).flatten()  # Resizing for dimensional consistency
+        tile_features.append(gray_resized)
+    tile_features = np.array(tile_features)
+    kmeans = KMeans(n_clusters=k)
+    kmeans.fit(tile_features)
+    return kmeans
+
+# Step 4: Form centroids
+def form_centroids(kmeans):
+    centroids = kmeans.cluster_centers_
+    return centroids
+
+# Step 5: Form cluster vocabulary
+def form_cluster_vocabulary(centroids):
+    tfidf = TfidfVectorizer()
+    cluster_vocabulary = tfidf.fit_transform([' '.join(map(str, centroid)) for centroid in centroids])
+    return cluster_vocabulary, tfidf
+
+# Step 6: Sort and concatenate cluster vocabulary
+def sort_and_concatenate(cluster_vocabulary):
+    sorted_vocabulary = [' '.join(map(str, centroid)) for centroid in cluster_vocabulary.toarray()]
+    concatenated_vocabulary = ' '.join(sorted_vocabulary)
+    return concatenated_vocabulary
+
+# Step 7: Disable flags of tfidf
+def disable_tfidf_flags(tfidf):
+    tfidf.stop_words_ = None
+    tfidf.token_pattern_ = r'\b\w+\b'
+
+# Step 8: Create a database for text corpus
+def create_database(cluster_vocabulary, output_db='image_documents.db'):
+    conn = sqlite3.connect(output_db)
+    c = conn.cursor()
+    c.execute('CREATE TABLE IF NOT EXISTS documents (id INTEGER PRIMARY KEY, document TEXT)')
+    for i, doc in enumerate(cluster_vocabulary):
+        c.execute('INSERT INTO documents (id, document) VALUES (?,?)', (i, doc))
+    conn.commit()
+    conn.close()
+
+# Step 9: Determine importance of clusters
+def determine_importance(cluster_vocabulary):
+    importance = {}
+    for doc in cluster_vocabulary:
+        for cluster in doc.split():
+            if cluster not in importance:
+                importance[cluster] = 0
+            importance[cluster] += 1
+    return importance
+
+# Step 10: Given a new image, determine patches
+def determine_patches(new_image, num_tiles):
+    img = cv2.imread(new_image)
+    height, width, _ = img.shape
+    tile_size = int(np.sqrt(height * width / num_tiles))
+    patches = []
+    for i in range(num_tiles):
+        x = (i % int(np.sqrt(num_tiles))) * tile_size
+        y = (i // int(np.sqrt(num_tiles))) * tile_size
+        patch = img[y:y+tile_size, x:x+tile_size]
+        patches.append(patch)
+    return patches
+
+# Step 11: Determine closest clusters
+def determine_closest_clusters(patches, kmeans):
+    closest_clusters = []
+    for patch in patches:
+        gray = cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY)
+        gray_resized = cv2.resize(gray, (32, 32)).flatten()  # Resizing for dimensional consistency
+        closest_cluster = kmeans.predict([gray_resized])
+        closest_clusters.append(closest_cluster[0])
+    return closest_clusters
+
+# Step 12: Filter-out non tf-idf clusters
+def filter_out_non_tfidf_clusters(closest_clusters, importance):
+    filtered_clusters = []
+    for cluster in closest_clusters:
+        if importance[str(cluster)] > 1:  # Filter based on importance
+            filtered_clusters.append(cluster)
+    return filtered_clusters
+
+# Step 13: Visually inspect
+def visually_inspect(filtered_clusters, new_image):
+    img = cv2.imread(new_image)
+    height, width, _ = img.shape
+    tile_size = int(np.sqrt(height * width / len(filtered_clusters)))
+    for i, cluster in enumerate(filtered_clusters):
+        x = (i % int(np.sqrt(len(filtered_clusters)))) * tile_size
+        y = (i // int(np.sqrt(len(filtered_clusters)))) * tile_size
+        cv2.rectangle(img, (x, y), (x+tile_size, y+tile_size), (0, 255, 0), 2)
+    cv2.imshow('Inspected Image', img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+# Step 14: Mark center of the detected points
+def mark_center_of_detected_points(filtered_clusters, new_image):
+    img = cv2.imread(new_image)
+    height, width, _ = img.shape
+    tile_size = int(np.sqrt(height * width / len(filtered_clusters)))
+    for i, cluster in enumerate(filtered_clusters):
+        x = (i % int(np.sqrt(len(filtered_clusters)))) * tile_size
+        y = (i // int(np.sqrt(len(filtered_clusters)))) * tile_size
+        center_x = x + tile_size // 2
+        center_y = y + tile_size // 2
+        cv2.circle(img, (center_x, center_y), 5, (0, 0, 255), -1)
+    cv2.imshow('Detected Points', img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+# Step 15: Create a dataset for mapping
+def create_dataset(tiles, filtered_clusters, output_folder='dataset'):
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    x_data = []
+    y_data = []
+    for i, tile in enumerate(tiles):
+        gray = cv2.cvtColor(tile, cv2.COLOR_BGR2GRAY)
+        x_data.append(tile)
+        if i in filtered_clusters:
+            y_data.append(1)
+        else:
+            y_data.append(0)
+    x_data = np.array(x_data)
+    y_data = np.array(y_data)
+    np.save(os.path.join(output_folder, 'x_data.npy'), x_data)
+    np.save(os.path.join(output_folder, 'y_data.npy'), y_data)
+
+# Example usage
+input_folder = '/path/to/input_images'
+output_folder = '/path/to/tiled_images'
+new_image = '/path/to/new_image.jpg'
+num_tiles = 10
+k = 100
+
+# Step 1
+tiles = tile_images(input_folder, num_tiles)
+
+# Step 2
+store_tiles(tiles, output_folder)
+
+# Step 3
+kmeans = cluster_tiles(tiles, k)
+
+# Step 4
+centroids = form_centroids(kmeans)
+
+# Step 5
+cluster_vocabulary, tfidf = form_cluster_vocabulary(centroids)
+
+# Step 6
+concatenated_vocabulary = sort_and_concatenate(cluster_vocabulary)
+
+# Step 7
+disable_tfidf_flags(tfidf)
+
+# Step 8
+create_database(cluster_vocabulary)
+
+# Step 9
+importance = determine_importance(cluster_vocabulary)
+
+# Step 10
+patches = determine_patches(new_image, num_tiles)
+
+# Step 11
+closest_clusters = determine_closest_clusters(patches, kmeans)
+
+# Step 12
+filtered_clusters = filter_out_non_tfidf_clusters(closest_clusters, importance)
+
+# Step 13
+visually_inspect(filtered_clusters, new_image)
+
+# Step 14
+mark_center_of_detected_points(filtered_clusters, new_image)
+
+# Step 15
+create_dataset(tiles, filtered_clusters)
